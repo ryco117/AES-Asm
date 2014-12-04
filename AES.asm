@@ -2,15 +2,6 @@ global _start
 
 section .text
 _start:
-	;movdqu xmm0, [AES_TEST]					;Get test string
-	;movdqu [PLAINTEXT], xmm0
-	;movdqu xmm0, [KEY_TEST]					;Get test key
-	;movdqu [KEY], xmm0
-	;movdqu xmm0, [KEY_TEST + 0x10]			;Get test key
-	;movdqu [KEY + 0x10], xmm0
-	;movdqu xmm0, [IV_TEST]					;Get test IV
-	;movdqu [IV], xmm0
-	
 	mov ecx, MsgOrig
 	mov edx, 0x0B
 	call Print
@@ -63,6 +54,16 @@ Memcpy_Loop:
 	loop Memcpy_Loop
 	pop rdx
 	ret
+	
+	;rax = dest, rcx = size
+Zero:
+	push rdx
+	mov dl, 0
+Zero_Loop:
+	mov [rax + rcx - 1], dl
+	loop Zero_Loop
+	pop rdx
+	ret
 
 	;rax = ptr plaintext, rbx = text size, rcx = ptr key, rdx = ptr IV
 AESEncrypt:
@@ -87,7 +88,7 @@ AESEncrypt:
 	mov rdx, [REAL_SIZE]					;Message size
 	add rdx, rax							;Size needed for AES operations (multiple of 16)
 	mov [TOTAL_SIZE], rdx
-	shl rdx, 1								;Multiply by 2 (plaintext & cipher)
+	;shl rdx, 1								;Multiply by 2 (plaintext & cipher)
 	add rdx, 0x30							;Add size of IV + Key
 	sub rsp, rdx							;Create room on stack for local vars
 	mov rbp, rsp
@@ -164,7 +165,7 @@ AESEncrypt_Loop:
 	aesenclast xmm0, xmm7
 
 	lea rax, [rbp + 0x30]					;Start of Plaintext
-	add rax, rbx							;Start of Cipher
+	;add rax, rbx							;Start of Cipher
 	add rax, rcx							;Current pos in Cipher
 	movdqu [rax], xmm0						;store block
 	movdqu [rbp], xmm0						;Overwrite IV with State (for CBC)
@@ -173,7 +174,7 @@ AESEncrypt_Loop:
 	jne AESEncrypt_Loop
 	
 	lea rax, [rbp + 0x30]					;Start of Plaintext
-	add rax, rbx							;Start of Cipher
+	;add rax, rbx							;Start of Cipher
 	movq xmm0, rax
 	
 	mov	rax, 45		;sys_brk
@@ -192,8 +193,12 @@ AESEncrypt_Loop:
 	mov rcx, [TOTAL_SIZE]					;bytes to write
 	call Memcpy
 	
+	lea rax, [rbp + 0x30]					;Position in stack of cipher
+	mov rcx, [TOTAL_SIZE]					;Zero it
+	call Zero
+	
 	mov rax, [TOTAL_SIZE]					;size of plaintext+padding
-	shl rax, 1								;double (cipher + decrypt)
+	;shl rax, 1								;double (cipher + decrypt)
 	add rax, 0x30							;add IV + Key
 	add rsp, rax							;adjust stack pointer back
 	pop rbp
@@ -214,7 +219,7 @@ AESDecrypt:
 	movq xmm2, rcx
 	movq xmm3, rdx
 	
-	shl rbx, 1
+	;shl rbx, 1
 	add rbx, 0x30
 	sub rsp, rbx							;Reserve SIZE bytes on stack for local vars
 	mov rbp, rsp
@@ -286,7 +291,7 @@ AESDecrypt_Loop:
 	pxor xmm0, xmm1
 	
 	lea rax, [rbp + 0x30]					;Start of Cipher
-	add rax, rbx							;Start of Plaintext
+	;add rax, rbx							;Start of Plaintext
 	add rax, rcx							;Current pos in Plaintext
 	movdqu [rax], xmm0						;Store block
 	movdqu [rbp], xmm8						;Overwrite IV with original state (for CBC)
@@ -302,7 +307,7 @@ AESDecrypt_Loop:
 	mov [REAL_SIZE], rax
 	
 	lea rax, [rbp + 0x30]					;Start of Cipher
-	add rax, [TOTAL_SIZE]					;Start of Plaintext
+	;add rax, [TOTAL_SIZE]					;Start of Plaintext
 	movq xmm0, rax
 	
 	mov	rax, 45		;sys_brk
@@ -321,8 +326,12 @@ AESDecrypt_Loop:
 	mov rcx, [REAL_SIZE]					;bytes to write
 	call Memcpy
 	
+	lea rax, [rbp + 0x30]					;Position in stack of decrypt
+	mov rcx, [TOTAL_SIZE]					;Zero it
+	call Zero
+	
 	mov rax, [TOTAL_SIZE]					;size of cipher
-	shl rax, 1								;double (cipher + plaintext)
+	;shl rax, 1								;double (cipher + plaintext)
 	add rax, 0x30							;add IV + Key
 	add rsp, rax							;adjust stack pointer back
 	pop rbp
