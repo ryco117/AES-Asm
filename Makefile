@@ -1,5 +1,4 @@
-test: test.o
-	ld test.o -o test
-
-test.o: AES.asm
-	nasm -f elf64 AES.asm -o test.o
+test:
+	nasm -f elf64 -o AES.o AES.asm
+	g++ -c main.cpp -o main.o -O3
+	g++ -o a.out AES.o main.o -O3
