@@ -18,6 +18,11 @@ int main()
 	std::cout << "Original: " << Message << std::endl;
 	std::cout << "Encrypted: " << buff << std::endl;
 	int len = Decrypt(buff, 80, IV, Key, buff);
+	if(len == -1)
+	{
+		std::cout << "Was not padded correctly\n";
+		return len;
+	}
 	buff[len] = 0;
 	std::cout << "Decrypted: " << buff << std::endl;
 	return 0;

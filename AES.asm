@@ -269,6 +269,14 @@ AESDecrypt_Loop:
 	mov bl, byte [rdx]
 	mov rax, [rbp + TOTAL_SIZE]
 	sub rax, rbx							;Get Size of message assuming PKCS 7
+	
+	mov rcx, rbx							;Last byte val = number to check
+	lea rdx, [r8 + rax]						;Start of padding
+AESDecrypt_CheckPad_Loop:
+	cmp byte [rdx + rcx - 1], bl
+	jne AESDecrypt_BadPad
+	loop AESDecrypt_CheckPad_Loop
+	
 	push rax
 	
 	mov rax, rbp							;Position of stack vars
@@ -279,6 +287,9 @@ AESDecrypt_Loop:
 	add rsp, 0x108							;adjust stack pointer back
 	pop rbp
 
+	ret
+AESDecrypt_BadPad:
+	mov rax, -1
 	ret
 
 CreateSchedule:
