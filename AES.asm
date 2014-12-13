@@ -275,6 +275,7 @@ AESDecrypt_Loop:
 AESDecrypt_CheckPad_Loop:
 	cmp byte [rdx + rcx - 1], bl
 	jne AESDecrypt_BadPad
+	mov byte [rdx + rcx - 1], 0x00			;Zero it (it's padding, we don't need it. Plus helps out good ol' c strings)
 	loop AESDecrypt_CheckPad_Loop
 	
 	push rax
@@ -289,7 +290,13 @@ AESDecrypt_CheckPad_Loop:
 
 	ret
 AESDecrypt_BadPad:
+	mov rax, rbp							;Position of stack vars
+	mov rcx, 0x108							;Size of stack
+	call Zero								;Zero it
+	
 	mov rax, -1
+	add rsp, 0x108							;adjust stack pointer back
+	pop rbp
 	ret
 
 CreateSchedule:
