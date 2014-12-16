@@ -1,5 +1,6 @@
 global Encrypt
 global Decrypt
+global AESNI
 
 IV				equ 0x0000
 ROUND_KEYS		equ 0x0010
@@ -9,6 +10,25 @@ PADDED_BLOCK	equ 0x0110
 PAD_SIZE		equ 0x0120
 
 section .text
+
+	;bool AESNI()
+AESNI:
+	xor rax, rax
+	xor rcx, rcx
+	cpuid
+	cmp rax, 1
+	jl AESNI_False
+	mov rax, 1
+	xor rcx, rcx
+	cpuid
+	test rcx, 0x2000000
+	jz AESNI_False
+AESNI_True:
+	mov rax, 1
+	ret
+AESNI_False:
+	mov rax, 0
+	ret
 
 	;rax = src, rbx = dest, rcx = size
 Memcpy:
