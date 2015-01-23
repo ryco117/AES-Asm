@@ -1,5 +1,7 @@
-global Encrypt
-global Decrypt
+global EncryptWin
+global DecryptWin
+global EncryptNix
+global DecryptNix
 global AESNI
 
 IV				equ 0x0000
@@ -54,9 +56,18 @@ Zero_Loop:
 	ret
 
 	;void Encrypt(char* Text, int64 size, char* IV, char* Key, char* Buffer)
-Encrypt:
+EncryptNix:
 	mov rbx, rsi							;Get second parameter (Text Size)
 	mov rax, rdi							;Get first parameter (Plaintext Ptr)
+	call AESEncrypt
+	ret
+EncryptWin:
+	mov rax, rcx							;Get first parameter (Plaintext Ptr)
+	mov rbx, rdx							;Get second parameter (Text Size)
+	mov rdx, r8								;Get third parameter (IV Ptr)
+	mov rcx, r9								;Get fourth parameter (Key Ptr)
+	mov r8,	[rsp+0x28]						;Get fifth parameter (Buffer Ptr)
+	
 	call AESEncrypt
 	ret
 	
@@ -196,13 +207,22 @@ AESEncrypt_Finish:
 	ret
 
 	;int _Decrypt(char* Cipher, int64 size, char* IV, char* Key, char* Buffer)
-Decrypt:
+DecryptNix:
 	mov rbx, rsi							;Get second parameter (Text Size)
 	mov rax, rdi							;Get first parameter (Plaintext Ptr)
 	call AESDecrypt
 	ret
+DecryptWin:
+	mov rax, rcx							;Get first parameter (Cipher Ptr)
+	mov rbx, rdx							;Get second parameter (Text Size)
+	mov rdx, r8								;Get third parameter (IV Ptr)
+	mov rcx, r9								;Get fourth parameter (Key Ptr)
+	mov r8,	[rsp+0x28]						;Get fifth parameter (Buffer Ptr)
 	
-	;rax = ptr cipher, rbx = size, rcx = ptr key, rdx = ptr IV
+	call AESDecrypt
+	ret
+	
+	;rax = ptr cipher, rbx = size, rcx = ptr key, rdx = ptr IV, r8 = Buffer to fill
 AESDecrypt:
 	push rbp
 	
