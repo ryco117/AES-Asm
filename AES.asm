@@ -4,12 +4,14 @@ global EncryptNix
 global DecryptNix
 global AESNI
 
-IV				equ 0x0000
-ROUND_KEYS		equ 0x0010
-TOTAL_SIZE		equ 0x0100
-REAL_SIZE		equ 0x0108
-PADDED_BLOCK	equ 0x0110
-PAD_SIZE		equ 0x0120
+IV					equ 0x0000
+ROUND_KEYS			equ 0x0010
+TOTAL_SIZE			equ 0x0100
+REAL_SIZE			equ 0x0108
+PADDED_BLOCK		equ 0x0110
+PAD_SIZE			equ 0x0120
+BOUNDARY_ALIGN_ENC	equ	0x0121
+BOUNDARY_ALIGN_DEC	equ	0x0108
 
 section .text
 
@@ -89,16 +91,22 @@ AESEncrypt:
 	;|----------|-------------------------------|
 	;|	0x0120	|	Pad Size (Byte)				|
 	;|----------|-------------------------------|
+	;|	0x0121	|	Boundary Align (Byte)		|
+	;|----------|-------------------------------|
 	
-	sub rsp, 0x121							;Create room on stack for local vars
-	mov rbp, rsp
+	sub rsp, 0x122							;Create room on stack for local vars
+	mov rbp, rsp							;Get rsp after offset
+	and rsp, 0xFFFFFFFFFFFFFFF0				;Round rsp down to nearest 16 byte boundary
+	sub rbp, rsp							;Determine how much the rounding offset rsp
+	mov [rsp + BOUNDARY_ALIGN_ENC], bpl		;Store this offset
+	mov rbp, rsp							;Set rbp to the 16 byte boundary
 	
 	movdqu xmm0, [rdx]						;Grab IV
-	movdqu [rbp + IV], xmm0					;Store On Stack
+	movdqa [rbp + IV], xmm0					;Store On Stack
 	movdqu xmm0, [rcx]						;Grab Key Pt 1
-	movdqu [rbp + ROUND_KEYS], xmm0			;Store On Stack
+	movdqa [rbp + ROUND_KEYS], xmm0			;Store On Stack
 	movdqu xmm0, [rcx + 0x10]				;Grab Key Pt 2
-	movdqu [rbp + ROUND_KEYS + 0x10], xmm0	;Store On Stack
+	movdqa [rbp + ROUND_KEYS + 0x10], xmm0	;Store On Stack
 	mov [rbp + REAL_SIZE], rbx				;Store Real Size
 	
 	push rax								;Store plaintext ptr
@@ -149,25 +157,25 @@ AESEncrypt_Loop:
 	sub rbx, rcx							;Bytes left to encrypt
 	cmp rbx, 0x10
 	jnz AESEncrypt_Loop_RegBlock			;If we are encrypting more than one block, not padding yet
-	movdqu xmm0, [rbp + PADDED_BLOCK]
+	movdqa xmm0, [rbp + PADDED_BLOCK]
 	jmp AESEncrypt_Loop_Enc
 	
 AESEncrypt_Loop_RegBlock:
 	movdqu xmm0, [rax + rcx]				;Initial block data
 AESEncrypt_Loop_Enc:
 	lea rdx, [rbp + ROUND_KEYS]
-	movdqu xmm1, [rbp + IV]					;Get the IV
-	movdqu xmm2, [rdx]						;Get Key Pt 1
+	movdqa xmm1, [rbp + IV]					;Get the IV
+	movdqa xmm2, [rdx]						;Get Key Pt 1
 	pxor xmm0, xmm1
 	pxor xmm0, xmm2
 	
-	movdqu xmm1, [rdx + 0x10]
-	movdqu xmm2, [rdx + 0x20]
-	movdqu xmm3, [rdx + 0x30]
-	movdqu xmm4, [rdx + 0x40]
-	movdqu xmm5, [rdx + 0x50]
-	movdqu xmm6, [rdx + 0x60]
-	movdqu xmm7, [rdx + 0x70]
+	movdqa xmm1, [rdx + 0x10]
+	movdqa xmm2, [rdx + 0x20]
+	movdqa xmm3, [rdx + 0x30]
+	movdqa xmm4, [rdx + 0x40]
+	movdqa xmm5, [rdx + 0x50]
+	movdqa xmm6, [rdx + 0x60]
+	movdqa xmm7, [rdx + 0x70]
 	aesenc xmm0, xmm1
 	aesenc xmm0, xmm2
 	aesenc xmm0, xmm3
@@ -176,13 +184,13 @@ AESEncrypt_Loop_Enc:
 	aesenc xmm0, xmm6
 	aesenc xmm0, xmm7
 	
-	movdqu xmm1, [rdx + 0x80]
-	movdqu xmm2, [rdx + 0x90]
-	movdqu xmm3, [rdx + 0xA0]
-	movdqu xmm4, [rdx + 0xB0]
-	movdqu xmm5, [rdx + 0xC0]
-	movdqu xmm6, [rdx + 0xD0]
-	movdqu xmm7, [rdx + 0xE0]
+	movdqa xmm1, [rdx + 0x80]
+	movdqa xmm2, [rdx + 0x90]
+	movdqa xmm3, [rdx + 0xA0]
+	movdqa xmm4, [rdx + 0xB0]
+	movdqa xmm5, [rdx + 0xC0]
+	movdqa xmm6, [rdx + 0xD0]
+	movdqa xmm7, [rdx + 0xE0]
 	aesenc xmm0, xmm1
 	aesenc xmm0, xmm2
 	aesenc xmm0, xmm3
@@ -192,8 +200,8 @@ AESEncrypt_Loop_Enc:
 	aesenclast xmm0, xmm7
 
 	lea rdx, [r8 + rcx]						;Position in buffer
-	movdqu [rdx], xmm0						;store block
-	movdqu [rbp + IV], xmm0					;Overwrite IV with State (for CBC)
+	movdqu [rdx], xmm0						;Store block
+	movdqa [rbp + IV], xmm0					;Overwrite IV with State (for CBC)
 	add rcx, 0x10							;Add one block to count
 	jmp AESEncrypt_Loop
 AESEncrypt_Finish:
@@ -201,8 +209,11 @@ AESEncrypt_Finish:
 	mov rcx, 0x121							;Size of stack allocated
 	call Zero								;Zero it all!
 	
-	add rsp, 0x121							;adjust stack pointer back
-	pop rbp
+	add rsp, 0x122							;Adjust stack pointer back
+	xor rbx, rbx
+	mov bl, byte [rbp + BOUNDARY_ALIGN_ENC]
+	add rsp, rbx							;Add back boundary offset
+	pop rbp									;Get original rpb
 	
 	ret
 
@@ -234,16 +245,22 @@ AESDecrypt:
 	;|----------|-------------------------------|
 	;|	0x0100	|	Total Size (Qword)			|
 	;|----------|-------------------------------|
+	;|	0x0108	|	Boundary Align (Byte)		|
+	;|----------|-------------------------------|
 	
-	sub rsp, 0x108							;Create room on stack for local vars
-	mov rbp, rsp	
+	sub rsp, 0x109							;Create room on stack for local vars
+	mov rbp, rsp
+	and rsp, 0xFFFFFFFFFFFFFFF0				;Round rsp down to nearest 16 byte boundary
+	sub rbp, rsp
+	mov [rsp + BOUNDARY_ALIGN_DEC], bpl
+	mov rbp, rsp
 	
 	movdqu xmm0, [rdx]						;Grab IV
-	movdqu [rbp + IV], xmm0					;Store On Stack
+	movdqa [rbp + IV], xmm0					;Store On Stack
 	movdqu xmm0, [rcx]						;Grab Key Pt 1
-	movdqu [rbp + ROUND_KEYS], xmm0			;Store On Stack
+	movdqa [rbp + ROUND_KEYS], xmm0			;Store On Stack
 	movdqu xmm0, [rcx + 0x10]				;Grab Key Pt 2
-	movdqu [rbp + ROUND_KEYS + 0x10], xmm0	;Store On Stack
+	movdqa [rbp + ROUND_KEYS + 0x10], xmm0	;Store On Stack
 	mov [rbp + TOTAL_SIZE], rbx				;Store Total Size
 	
 	push rax
@@ -260,15 +277,15 @@ AESDecrypt:
 AESDecrypt_Loop:
 	lea rdx, [rbp + ROUND_KEYS]
 	movdqu xmm0, [rax + rcx]				;Initial block data
-	movdqu xmm8, xmm0						;Store to be next IV
+	movdqa xmm8, xmm0						;Store to be next IV
 	
-	movdqu xmm1, [rdx + 0x80]
-	movdqu xmm2, [rdx + 0x90]
-	movdqu xmm3, [rdx + 0xA0]
-	movdqu xmm4, [rdx + 0xB0]
-	movdqu xmm5, [rdx + 0xC0]
-	movdqu xmm6, [rdx + 0xD0]
-	movdqu xmm7, [rdx + 0xE0]
+	movdqa xmm1, [rdx + 0x80]
+	movdqa xmm2, [rdx + 0x90]
+	movdqa xmm3, [rdx + 0xA0]
+	movdqa xmm4, [rdx + 0xB0]
+	movdqa xmm5, [rdx + 0xC0]
+	movdqa xmm6, [rdx + 0xD0]
+	movdqa xmm7, [rdx + 0xE0]
 	pxor xmm0, xmm7
 	aesdec xmm0, xmm6
 	aesdec xmm0, xmm5
@@ -277,13 +294,13 @@ AESDecrypt_Loop:
 	aesdec xmm0, xmm2
 	aesdec xmm0, xmm1
 	
-	movdqu xmm1, [rdx + 0x10]
-	movdqu xmm2, [rdx + 0x20]
-	movdqu xmm3, [rdx + 0x30]
-	movdqu xmm4, [rdx + 0x40]
-	movdqu xmm5, [rdx + 0x50]
-	movdqu xmm6, [rdx + 0x60]
-	movdqu xmm7, [rdx + 0x70]
+	movdqa xmm1, [rdx + 0x10]
+	movdqa xmm2, [rdx + 0x20]
+	movdqa xmm3, [rdx + 0x30]
+	movdqa xmm4, [rdx + 0x40]
+	movdqa xmm5, [rdx + 0x50]
+	movdqa xmm6, [rdx + 0x60]
+	movdqa xmm7, [rdx + 0x70]
 	aesdec xmm0, xmm7
 	aesdec xmm0, xmm6
 	aesdec xmm0, xmm5
@@ -292,19 +309,19 @@ AESDecrypt_Loop:
 	aesdec xmm0, xmm2
 	aesdec xmm0, xmm1
 	
-	movdqu xmm1, [rbp]	 					;Get IV
-	movdqu xmm2, [rdx]						;Get Key Pt 1
+	movdqa xmm1, [rbp]	 					;Get IV
+	movdqa xmm2, [rdx]						;Get Key Pt 1
 	aesdeclast xmm0, xmm2
 	pxor xmm0, xmm1
 	
 	lea rdx, [r8 + rcx]						;Current pos in Plaintext
 	movdqu [rdx], xmm0						;Store block
-	movdqu [rbp + IV], xmm8					;Overwrite IV with original state (for CBC)
+	movdqa [rbp + IV], xmm8					;Overwrite IV with original state (for CBC)
 	add rcx, 0x10							;Add one block to count
 	cmp rcx, rbx
 	jne AESDecrypt_Loop
 	
-	add rdx, 0x0F							;last byte of plaintext
+	add rdx, 0x0F							;Last byte of plaintext
 	xor rbx, rbx
 	mov bl, byte [rdx]
 	mov rax, [rbp + TOTAL_SIZE]
@@ -325,7 +342,10 @@ AESDecrypt_CheckPad_Loop:
 	call Zero								;Zero it
 	
 	pop rax
-	add rsp, 0x108							;adjust stack pointer back
+	add rsp, 0x109							;Adjust stack pointer back
+	xor rbx, rbx
+	mov bl, byte [rbp + BOUNDARY_ALIGN_DEC]
+	add rsp, rbx							;Add back boundary offset
 	pop rbp
 
 	ret
@@ -335,94 +355,98 @@ AESDecrypt_BadPad:
 	call Zero								;Zero it
 	
 	mov rax, -1
-	add rsp, 0x108							;adjust stack pointer back
+	add rsp, 0x109							;Adjust stack pointer back
+	xor rbx, rbx
+	mov bl, byte [rbp + BOUNDARY_ALIGN_DEC]
+	add rsp, rbx							;Add back boundary offset
 	pop rbp
+	
 	ret
 
 CreateSchedule:
-	movdqu xmm1, [rax]						;Bytes 0-15 of 256bit private key
-	movdqu xmm2, [rax + 0x10]				;Bytes 16-31 of 256bit private key
+	movdqa xmm1, [rax]						;Bytes 0-15 of 256bit private key
+	movdqa xmm2, [rax + 0x10]				;Bytes 16-31 of 256bit private key
 	
 	add rax, 0x20							;Roundkeys offset, set to 32 bytes
 	aeskeygenassist xmm3, xmm2, 0x01
 	call KeyExpansion_1
-	movdqu [rax], xmm1						;Store in schedule
+	movdqa [rax], xmm1						;Store in schedule
 	call KeyExpansion_2
-	movdqu [rax + 0x10], xmm2				;Store in schedule
+	movdqa [rax + 0x10], xmm2				;Store in schedule
 	aeskeygenassist xmm3, xmm2, 0x02
 	call KeyExpansion_1
-	movdqu [rax + 0x20], xmm1				;Store in schedule
+	movdqa [rax + 0x20], xmm1				;Store in schedule
 	call KeyExpansion_2
-	movdqu [rax + 0x30], xmm2				;Store in schedule
+	movdqa [rax + 0x30], xmm2				;Store in schedule
 	aeskeygenassist xmm3, xmm2, 0x04
 	call KeyExpansion_1
-	movdqu [rax + 0x40], xmm1				;Store in schedule
+	movdqa [rax + 0x40], xmm1				;Store in schedule
 	call KeyExpansion_2
-	movdqu [rax + 0x50], xmm2				;Store in schedule
+	movdqa [rax + 0x50], xmm2				;Store in schedule
 	aeskeygenassist xmm3, xmm2, 0x08
 	call KeyExpansion_1
-	movdqu [rax + 0x60], xmm1				;Store in schedule
+	movdqa [rax + 0x60], xmm1				;Store in schedule
 	call KeyExpansion_2
-	movdqu [rax + 0x70], xmm2				;Store in schedule
+	movdqa [rax + 0x70], xmm2				;Store in schedule
 	aeskeygenassist xmm3, xmm2, 0x10
 	call KeyExpansion_1
-	movdqu [rax + 0x80], xmm1				;Store in schedule
+	movdqa [rax + 0x80], xmm1				;Store in schedule
 	call KeyExpansion_2
-	movdqu [rax + 0x90], xmm2				;Store in schedule
+	movdqa [rax + 0x90], xmm2				;Store in schedule
 	aeskeygenassist xmm3, xmm2, 0x20
 	call KeyExpansion_1
-	movdqu [rax + 0xA0], xmm1				;Store in schedule
+	movdqa [rax + 0xA0], xmm1				;Store in schedule
 	call KeyExpansion_2
-	movdqu [rax + 0xB0], xmm2				;Store in schedule
+	movdqa [rax + 0xB0], xmm2				;Store in schedule
 	aeskeygenassist xmm3, xmm2, 0x40
 	call KeyExpansion_1
-	movdqu [rax + 0xC0], xmm1				;Store in schedule
+	movdqa [rax + 0xC0], xmm1				;Store in schedule
 	ret
 
 InvMixColRounds:
-	movdqu xmm2, [rcx + 0x10]
-	movdqu xmm3, [rcx + 0x20]
-	movdqu xmm4, [rcx + 0x30]
-	movdqu xmm5, [rcx + 0x40]
-	movdqu xmm6, [rcx + 0x50]
-	movdqu xmm7, [rcx + 0x60]
+	movdqa xmm2, [rcx + 0x10]
+	movdqa xmm3, [rcx + 0x20]
+	movdqa xmm4, [rcx + 0x30]
+	movdqa xmm5, [rcx + 0x40]
+	movdqa xmm6, [rcx + 0x50]
+	movdqa xmm7, [rcx + 0x60]
     aesimc xmm1, xmm2
-    movdqu [rcx + 0x10], xmm1
+    movdqa [rcx + 0x10], xmm1
     aesimc xmm1, xmm3
-    movdqu [rcx + 0x20], xmm1
+    movdqa [rcx + 0x20], xmm1
     aesimc xmm1, xmm4
-    movdqu [rcx + 0x30], xmm1
+    movdqa [rcx + 0x30], xmm1
     aesimc xmm1, xmm5
-    movdqu [rcx + 0x40], xmm1
+    movdqa [rcx + 0x40], xmm1
     aesimc xmm1, xmm6
-    movdqu [rcx + 0x50], xmm1
+    movdqa [rcx + 0x50], xmm1
     aesimc xmm1, xmm7
-    movdqu [rcx + 0x60], xmm1
+    movdqa [rcx + 0x60], xmm1
 	
-	movdqu xmm2, [rcx + 0x70]
-	movdqu xmm3, [rcx + 0x80]
-	movdqu xmm4, [rcx + 0x90]
-	movdqu xmm5, [rcx + 0xA0]
-	movdqu xmm6, [rcx + 0xB0]
-	movdqu xmm7, [rcx + 0xC0]
+	movdqa xmm2, [rcx + 0x70]
+	movdqa xmm3, [rcx + 0x80]
+	movdqa xmm4, [rcx + 0x90]
+	movdqa xmm5, [rcx + 0xA0]
+	movdqa xmm6, [rcx + 0xB0]
+	movdqa xmm7, [rcx + 0xC0]
     aesimc xmm1, xmm2
-    movdqu [rcx + 0x70], xmm1
+    movdqa [rcx + 0x70], xmm1
     aesimc xmm1, xmm3
-    movdqu [rcx + 0x80], xmm1
+    movdqa [rcx + 0x80], xmm1
     aesimc xmm1, xmm4
-    movdqu [rcx + 0x90], xmm1
+    movdqa [rcx + 0x90], xmm1
     aesimc xmm1, xmm5
-    movdqu [rcx + 0xA0], xmm1
+    movdqa [rcx + 0xA0], xmm1
     aesimc xmm1, xmm6
-    movdqu [rcx + 0xB0], xmm1
+    movdqa [rcx + 0xB0], xmm1
     aesimc xmm1, xmm7
-    movdqu [rcx + 0xC0], xmm1
+    movdqa [rcx + 0xC0], xmm1
 	
-	movdqu xmm2, [rcx + 0xD0]
+	movdqa xmm2, [rcx + 0xD0]
     aesimc xmm1, xmm2
-    movdqu [rcx + 0xD0], xmm1
+    movdqa [rcx + 0xD0], xmm1
 	ret 
-
+	
 KeyExpansion_1:
 	pshufd xmm3, xmm3, 0xFF
 	vpslldq xmm4, xmm1, 4
